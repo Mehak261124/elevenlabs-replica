@@ -7,6 +7,7 @@ from typing import List
 import os
 from bson import ObjectId
 from dotenv import load_dotenv
+import certifi
 
 # Load environment variables
 load_dotenv()
@@ -28,13 +29,17 @@ app.mount("/static", StaticFiles(directory="static"), name="static")
 # MongoDB connection
 MONGODB_URL = os.getenv(
     "MONGODB_URL",
-    "mongodb+srv://elevenlabs_user:SimplePass123@cluster0.yg2egby.mongodb.net/admin?retryWrites=true&w=majority&appName=Cluster0"
+    "mongodb+srv://elevenlabs_user:SimplePass123@cluster0.yg2egby.mongodb.net/admin?retryWrites=true&w=majority"
 )
 
-# Initialize MongoDB connection with error handling
 def get_mongodb_client():
+    """Initialize MongoDB client with SSL/TLS support and error handling"""
     try:
-        client = MongoClient(MONGODB_URL, serverSelectionTimeoutMS=5000)
+        client = MongoClient(
+            MONGODB_URL,
+            tlsCAFile=certifi.where(),
+            serverSelectionTimeoutMS=5000
+        )
         client.server_info()  # test connection
         print("✅ MongoDB connection successful!")
         return client
@@ -43,6 +48,7 @@ def get_mongodb_client():
         print("📝 Using in-memory storage for development...")
         return None
 
+# Initialize client
 client = get_mongodb_client()
 if client:
     db = client.elevenlabs_replica
