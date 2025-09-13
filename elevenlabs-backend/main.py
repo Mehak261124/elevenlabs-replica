@@ -19,7 +19,7 @@ app.add_middleware(
     CORSMiddleware,
     allow_origins=[
         "http://localhost:3000",
-        "https://your-frontend-domain.vercel.app",  # replace with your deployed frontend
+        "https://elevenlabs-replica.vercel.app",  # replace with your deployed frontend
     ],
     allow_credentials=True,
     allow_methods=["*"],
