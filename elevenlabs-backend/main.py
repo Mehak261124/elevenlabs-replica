@@ -1,4 +1,4 @@
-from fastapi import FastAPI, HTTPException
+from fastapi import FastAPI, HTTPException, Request
 from fastapi.middleware.cors import CORSMiddleware
 from fastapi.staticfiles import StaticFiles
 from pymongo import MongoClient
@@ -17,7 +17,10 @@ app = FastAPI(title="ElevenLabs Replica API", version="1.0.0")
 # Enable CORS for your Next.js frontend
 app.add_middleware(
     CORSMiddleware,
-    allow_origins=["http://localhost:3000", "https://your-frontend-domain.vercel.app"],
+    allow_origins=[
+        "http://localhost:3000",
+        "https://your-frontend-domain.vercel.app",  # replace with your deployed frontend
+    ],
     allow_credentials=True,
     allow_methods=["*"],
     allow_headers=["*"],
@@ -33,14 +36,13 @@ MONGODB_URL = os.getenv(
 )
 
 def get_mongodb_client():
-    """Initialize MongoDB client with SSL/TLS support and error handling"""
     try:
         client = MongoClient(
             MONGODB_URL,
             tlsCAFile=certifi.where(),
             serverSelectionTimeoutMS=5000
         )
-        client.server_info()  # test connection
+        client.server_info()
         print("✅ MongoDB connection successful!")
         return client
     except Exception as e:
@@ -48,7 +50,6 @@ def get_mongodb_client():
         print("📝 Using in-memory storage for development...")
         return None
 
-# Initialize client
 client = get_mongodb_client()
 if client:
     db = client.elevenlabs_replica
@@ -61,7 +62,6 @@ else:
 class AudioFile(BaseModel):
     language: str
     text: str
-    audio_url: str
     filename: str
 
 class AudioResponse(BaseModel):
@@ -76,22 +76,16 @@ class LanguageOption(BaseModel):
     name: str
     flag: str
 
-# Get host and port from environment
-HOST = os.getenv("HOST", "localhost")
-PORT = int(os.getenv("PORT", 8000))
-
-# Sample data initialization
+# Sample data (only filenames, audio_url will be generated dynamically)
 SAMPLE_AUDIO_DATA = [
     {
         "language": "english",
-        "text": "In the ancient land of Eldoria, where skies shimmered and forests, whispered secrets to the wind, lived a dragon named Zephyros. [sarcastically] Not the \"burn it all down\" kind... [giggles] but he was gentle, wise, with eyes like old stars. [whispers] Even the birds fell silent when he passed.",
-        "audio_url": f"http://{HOST}:{PORT}/static/english_sample.mp3",
+        "text": "In the ancient land of Eldoria, where skies shimmered and forests whispered secrets...",
         "filename": "english_sample.mp3"
     },
     {
         "language": "arabic",
-        "text": "في أرض إلدوريا القديمة، حيث كانت السماء تتلألأ والغابات تهمس بالأسرار للريح، عاش تنين يُدعى زيفيروس. [sarcastically] ليس من نوع \"يحرق كل شيء\"... [giggles] لكنه كان لطيفًا وحكيمًا، وعيناه تشبهان النجوم القديمة. [whispers] حتى الطيور كانت تصمت عندما يمر.",
-        "audio_url": f"http://{HOST}:{PORT}/static/arabic_sample.mp3",
+        "text": "في أرض إلدوريا القديمة، حيث كانت السماء تتلألأ والغابات تهمس بالأسرار للريح...",
         "filename": "arabic_sample.mp3"
     }
 ]
@@ -104,7 +98,6 @@ SUPPORTED_LANGUAGES = [
     {"code": "german", "name": "German", "flag": "🇩🇪"},
 ]
 
-# In-memory storage fallback
 in_memory_audio = []
 
 @app.on_event("startup")
@@ -121,8 +114,8 @@ async def startup_event():
                 print("📦 MongoDB already has data")
         except Exception as e:
             print(f"❌ Error accessing MongoDB: {e}")
-            print("📝 Falling back to in-memory storage...")
             in_memory_audio = SAMPLE_AUDIO_DATA.copy()
+            print("📝 Falling back to in-memory storage...")
     else:
         in_memory_audio = SAMPLE_AUDIO_DATA.copy()
         print("📝 Using in-memory storage - sample data loaded")
@@ -133,96 +126,70 @@ async def root():
 
 @app.get("/api/languages", response_model=List[LanguageOption])
 async def get_languages():
-    """Get list of supported languages"""
     return SUPPORTED_LANGUAGES
 
 @app.get("/api/audio/{language}", response_model=AudioResponse)
-async def get_audio_by_language(language: str):
+async def get_audio_by_language(language: str, request: Request):
     """Get audio file URL for a specific language"""
+    audio_doc = None
+
     if audio_collection is not None:
         try:
             audio_doc = audio_collection.find_one({"language": language.lower()})
-            if not audio_doc:
-                raise HTTPException(status_code=404, detail=f"Audio for language '{language}' not found")
-            return AudioResponse(
-                id=str(audio_doc.get("_id", "temp_id")),
-                language=audio_doc["language"],
-                text=audio_doc["text"],
-                audio_url=audio_doc["audio_url"],
-                filename=audio_doc["filename"]
-            )
         except Exception as e:
-            print(f"MongoDB error, using fallback: {e}")
-            audio_doc = next((doc for doc in in_memory_audio if doc["language"] == language.lower()), None)
-            if not audio_doc:
-                raise HTTPException(status_code=404, detail=f"Audio for language '{language}' not found")
-            return AudioResponse(
-                id="temp_" + language,
-                language=audio_doc["language"],
-                text=audio_doc["text"],
-                audio_url=audio_doc["audio_url"],
-                filename=audio_doc["filename"]
-            )
-    else:
+            print(f"MongoDB error: {e}")
+
+    if not audio_doc:
         audio_doc = next((doc for doc in in_memory_audio if doc["language"] == language.lower()), None)
-        if not audio_doc:
-            raise HTTPException(status_code=404, detail=f"Audio for language '{language}' not found")
-        return AudioResponse(
-            id="temp_" + language,
-            language=audio_doc["language"],
-            text=audio_doc["text"],
-            audio_url=audio_doc["audio_url"],
-            filename=audio_doc["filename"]
-        )
+
+    if not audio_doc:
+        raise HTTPException(status_code=404, detail=f"Audio for language '{language}' not found")
+
+    # Dynamically generate audio_url
+    audio_doc["audio_url"] = str(request.url_for("static", path=audio_doc["filename"]))
+
+    return AudioResponse(
+        id=str(audio_doc.get("_id", f"temp_{language}")),
+        language=audio_doc["language"],
+        text=audio_doc["text"],
+        audio_url=audio_doc["audio_url"],
+        filename=audio_doc["filename"]
+    )
 
 @app.get("/api/audio", response_model=List[AudioResponse])
-async def get_all_audio():
-    """Get all audio files"""
+async def get_all_audio(request: Request):
+    """Get all audio files with dynamic URLs"""
+    audio_list = []
     if audio_collection is not None:
         try:
             audio_docs = list(audio_collection.find())
-            return [
-                AudioResponse(
-                    id=str(doc["_id"]),
-                    language=doc["language"],
-                    text=doc["text"],
-                    audio_url=doc["audio_url"],
-                    filename=doc["filename"]
-                )
-                for doc in audio_docs
-            ]
         except Exception as e:
-            print(f"MongoDB error, using fallback: {e}")
-            return [
-                AudioResponse(
-                    id="temp_" + doc["language"],
-                    language=doc["language"],
-                    text=doc["text"],
-                    audio_url=doc["audio_url"],
-                    filename=doc["filename"]
-                )
-                for doc in in_memory_audio
-            ]
+            print(f"MongoDB error: {e}")
+            audio_docs = in_memory_audio
     else:
-        return [
+        audio_docs = in_memory_audio
+
+    for doc in audio_docs:
+        audio_list.append(
             AudioResponse(
-                id="temp_" + doc["language"],
+                id=str(doc.get("_id", f"temp_{doc['language']}")),
                 language=doc["language"],
                 text=doc["text"],
-                audio_url=doc["audio_url"],
+                audio_url=str(request.url_for("static", path=doc["filename"])),
                 filename=doc["filename"]
             )
-            for doc in in_memory_audio
-        ]
+        )
+    return audio_list
 
 @app.post("/api/audio", response_model=AudioResponse)
-async def create_audio(audio: AudioFile):
+async def create_audio(audio: AudioFile, request: Request):
     """Create a new audio file entry"""
+    audio_dict = audio.dict()
     if audio_collection is not None:
         try:
-            audio_dict = audio.dict()
             result = audio_collection.insert_one(audio_dict)
             created_doc = audio_collection.find_one({"_id": result.inserted_id})
+            created_doc["audio_url"] = str(request.url_for("static", path=created_doc["filename"]))
             return AudioResponse(
                 id=str(created_doc["_id"]),
                 language=created_doc["language"],
@@ -233,17 +200,17 @@ async def create_audio(audio: AudioFile):
         except Exception as e:
             raise HTTPException(status_code=500, detail=f"Database error: {str(e)}")
     else:
+        audio_dict["audio_url"] = str(request.url_for("static", path=audio.filename))
         return AudioResponse(
-            id="temp_" + audio.language,
+            id=f"temp_{audio.language}",
             language=audio.language,
             text=audio.text,
-            audio_url=audio.audio_url,
+            audio_url=audio_dict["audio_url"],
             filename=audio.filename
         )
 
 @app.delete("/api/audio/{audio_id}")
 async def delete_audio(audio_id: str):
-    """Delete an audio file entry"""
     if audio_collection is not None:
         try:
             result = audio_collection.delete_one({"_id": ObjectId(audio_id)})
@@ -257,4 +224,4 @@ async def delete_audio(audio_id: str):
 
 if __name__ == "__main__":
     import uvicorn
-    uvicorn.run(app, host=HOST, port=PORT)
+    uvicorn.run(app, host="0.0.0.0", port=int(os.getenv("PORT", 8000)))
