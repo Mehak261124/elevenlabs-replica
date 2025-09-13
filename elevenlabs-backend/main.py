@@ -76,16 +76,16 @@ class LanguageOption(BaseModel):
     name: str
     flag: str
 
-# Sample data (only filenames, audio_url will be generated dynamically)
+# Sample data with full text
 SAMPLE_AUDIO_DATA = [
     {
         "language": "english",
-        "text": "In the ancient land of Eldoria, where skies shimmered and forests whispered secrets...",
+        "text": "In the ancient land of Eldoria, where skies shimmered and forests, whispered secrets to the wind, lived a dragon named Zephyros. [sarcastically] Not the “burn it all down” kind... [giggles] but he was gentle, wise, with eyes like old stars. [whispers] Even the birds fell silent when he passed.",
         "filename": "english_sample.mp3"
     },
     {
         "language": "arabic",
-        "text": "في أرض إلدوريا القديمة، حيث كانت السماء تتلألأ والغابات تهمس بالأسرار للريح...",
+        "text": "في أرض إلدوريا القديمة، حيث كانت السماء تتلألأ والغابات تهمس بالأسرار للريح، عاش تنين يُدعى زيفيروس. [sarcastically] ليس من نوع \"يحرق كل شيء\"... [giggles] لكنه كان لطيفًا وحكيمًا، وعيناه تشبهان النجوم القديمة. [whispers] حتى الطيور كانت تصمت عندما يمر.",
         "filename": "arabic_sample.mp3"
     }
 ]
